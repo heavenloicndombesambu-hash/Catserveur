@@ -151,5 +151,4 @@ app.get("/", (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("CAT AMONG US fonctionne sur le port " + PORT);
-});
+  console.log("CAT AMONG US fonctionne sur le port " + 
