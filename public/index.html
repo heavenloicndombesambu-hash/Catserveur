@@ -1,1 +1,522 @@
 
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAT AMONG US</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101629;color:white;font-family:Arial,sans-serif}
+button,input,select{font:inherit}
+button{border:0;border-radius:12px;padding:12px 16px;background:#42d6c5;color:#10202b;font-weight:bold;cursor:pointer;margin:4px}
+button.secondary{background:#34415d;color:white}
+button.danger{background:#fa637b;color:white}
+input,select{width:100%;padding:13px;border-radius:10px;border:1px solid #52617f;background:#202d47;color:white;margin:6px 0 12px}
+h1,h2,h3{text-align:center}
+h1{font-size:38px;color:#60e8dc;text-shadow:0 0 20px #42d6c5}
+.panel{max-width:650px;margin:18px auto;padding:20px;background:#1b2741;border:1px solid #354665;border-radius:20px}
+.hidden{display:none!important}
+.small{color:#b7c5dd;font-size:13px}
+.cat{font-size:55px;text-align:center;animation:bounce 1.8s infinite}
+@keyframes bounce{50%{transform:translateY(-12px) rotate(5deg)}}
+@keyframes appear{from{opacity:0;transform:scale(.8)}to{opacity:1;transform:scale(1)}}
+.intro{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:20px;animation:appear 1s}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>*{flex:1}
+.player{padding:10px;margin:6px 0;background:#293956;border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.player button{padding:7px 10px}
+.tabs{display:flex;flex-wrap:wrap;justify-content:center}
+.stat{background:#293956;padding:12px;border-radius:12px;text-align:center;flex:1}
+#mapArea{height:250px;background:linear-gradient(135deg,#263d5a,#17243a);border:2px solid #52617f;border-radius:16px;position:relative;overflow:hidden;margin:12px 0}
+.room{position:absolute;border:2px solid #7694b9;border-radius:12px;background:#344b68aa;padding:10px;font-size:12px}
+#playersGame{max-height:270px;overflow:auto}
+#toast{position:fixed;bottom:15px;left:5%;width:90%;background:#42d6c5;color:#10202b;padding:12px;border-radius:12px;text-align:center;display:none;z-index:5;font-weight:bold}
+.shopItem{display:flex;justify-content:space-between;align-items:center;background:#293956;padding:12px;border-radius:12px;margin:8px 0}
+</style>
+</head>
+<body>
+
+<section id="intro" class="intro">
+  <div class="cat">🐱 🚀 🐱</div>
+  <h1>CAT AMONG US</h1>
+  <p>Qui est le chat imposteur ?</p>
+  <button onclick="show('menu')">JOUER</button>
+  <p class="small">Prépare tes moustaches...</p>
+</section>
+
+<section id="menu" class="panel hidden">
+  <h1>🐾 CAT AMONG US</h1>
+  <label>Ton pseudo</label>
+  <input id="nickname" maxlength="16" placeholder="Ton nom de chat" value="Heaven">
+  <div class="tabs">
+    <button onclick="startOffline()">Hors ligne</button>
+    <button class="secondary" onclick="show('online')">En ligne</button>
+    <button class="secondary" onclick="show('shop')">Boutique</button>
+    <button class="secondary" onclick="show('ranking')">Classement</button>
+    <button class="secondary" onclick="show('rules')">Rôles</button>
+  </div>
+  <h3>Mode hors ligne</h3>
+  <label>Nombre de PNJ à ajouter (maximum 10)</label>
+  <input id="offlineBots" type="number" min="0" max="10" value="10">
+  <label>Carte</label>
+  <select id="offlineMap">
+    <option>Vaisseau</option>
+    <option>Laboratoire</option>
+    <option>Ville</option>
+  </select>
+  <p class="small">Tu joues avec des PNJ. Le total ne dépassera jamais 11 participants.</p>
+</section>
+
+<section id="online" class="panel hidden">
+  <h2>🌐 Multijoueur en ligne</h2>
+  <label>Nombre de PNJ dans ton salon</label>
+  <input id="onlineBots" type="number" min="0" max="10" value="0">
+  <label>Carte</label>
+  <select id="onlineMap">
+    <option>Vaisseau</option>
+    <option>Laboratoire</option>
+    <option>Ville</option>
+  </select>
+  <button onclick="createRoom()">Créer un salon</button>
+  <hr>
+  <h3>Rejoindre un salon</h3>
+  <label>Code du salon</label>
+  <input id="roomCode" maxlength="6" placeholder="ABC123">
+  <button onclick="joinRoom()">Rejoindre</button>
+  <button class="secondary" onclick="show('menu')">Retour</button>
+</section>
+
+<section id="lobby" class="panel hidden">
+  <h2>🏠 Salon privé</h2>
+  <h1 id="roomCodeDisplay">------</h1>
+  <p class="small" style="text-align:center">Envoie ce code à tes amis.</p>
+  <label>Nombre de PNJ</label>
+  <input id="lobbyBots" type="number" min="0" max="10" value="0" onchange="changeBots()">
+  <label>Carte</label>
+  <select id="lobbyMap" onchange="changeMap()">
+    <option>Vaisseau</option>
+    <option>Laboratoire</option>
+    <option>Ville</option>
+  </select>
+  <h3>Participants</h3>
+  <div id="lobbyPlayers"></div>
+  <p id="lobbyCount" class="small"></p>
+  <button onclick="toggleReady()">Prêt / Pas prêt</button>
+  <button id="startButton" onclick="launchOnline()">Lancer la partie</button>
+  <button class="secondary" onclick="leaveRoom()">Quitter</button>
+</section>
+
+<section id="game" class="panel hidden">
+  <h2>🐱 Partie en cours</h2>
+  <div class="row">
+    <div class="stat"><span class="small">Carte</span><br><b id="gameMap">Vaisseau</b></div>
+    <div class="stat"><span class="small">Ton rôle</span><br><b id="myRole">En attente</b></div>
+    <div class="stat"><span class="small">Pièces</span><br><b id="coins">0</b></div>
+  </div>
+  <div id="mapArea">
+    <div class="room" style="top:12%;left:8%">Salle A</div>
+    <div class="room" style="top:12%;right:8%">Salle B</div>
+    <div class="room" style="bottom:12%;left:8%">Salle C</div>
+    <div class="room" style="bottom:12%;right:8%">Salle D</div>
+  </div>
+  <p id="gameMessage">Bienvenue dans la partie !</p>
+  <div class="row">
+    <button onclick="doTask()">🧰 Faire une mission</button>
+    <button class="secondary" onclick="callMeeting()">📢 Réunion</button>
+  </div>
+  <h3>Participants</h3>
+  <div id="playersGame"></div>
+  <h3>Sabotages</h3>
+  <div class="row">
+    <button class="danger" onclick="sabotage('Lumières')">💡 Lumières</button>
+    <button class="danger" onclick="sabotage('Communications')">📡 Communications</button>
+    <button class="danger" onclick="sabotage('Réacteur')">⚡ Réacteur</button>
+  </div>
+  <button onclick="repair()">🔧 Réparer le sabotage</button>
+  <div id="meetingArea" class="hidden">
+    <h3>🗳️ Réunion : vote</h3>
+    <div id="votePlayers"></div>
+    <button class="secondary" onclick="vote('skip')">Passer le vote</button>
+  </div>
+  <button class="secondary" onclick="show('menu')">Retour au menu</button>
+</section>
+
+<section id="shop" class="panel hidden">
+  <h2>🛍️ Boutique des chats</h2>
+  <p>Pièces : <b id="shopCoins">0</b></p>
+  <div id="shopItems"></div>
+  <button class="secondary" onclick="show('menu')">Retour</button>
+</section>
+
+<section id="ranking" class="panel hidden">
+  <h2>🏆 Classement</h2>
+  <div id="rankingList"></div>
+  <button class="secondary" onclick="show('menu')">Retour</button>
+</section>
+
+<section id="rules" class="panel hidden">
+  <h2>📖 Les 13 rôles</h2>
+  <h3>🟢 Innocents</h3>
+  <p>Équipier : termine les missions.</p>
+  <p>Détective : enquête sur les joueurs.</p>
+  <p>Médecin : protège un joueur.</p>
+  <p>Ingénieur : utilise les conduits.</p>
+  <p>Juge : possède un double vote utilisable une fois.</p>
+  <p>Shérif : peut éliminer un joueur qu'il soupçonne. S'il se trompe, il perd son pouvoir.</p>
+  <h3>🔴 Méchants</h3>
+  <p>Tueur classique : élimine et sabote.</p>
+  <p>Sniper : élimine à distance.</p>
+  <p>Ninja : peut devenir invisible.</p>
+  <p>Métamorphe : peut prendre l'apparence d'un autre joueur.</p>
+  <p>Tous les méchants ont un délai entre leurs éliminations.</p>
+  <h3>🟣 Neutres</h3>
+  <p>Pélican : doit éliminer tous les innocents. Il possède 2 vies.</p>
+  <p>Mentaliste : disponible uniquement au-dessus de 6 participants ; doit découvrir les rôles de 2 joueurs.</p>
+  <p>Bouffon : gagne s'il est éliminé par un vote.</p>
+  <button class="secondary" onclick="show('menu')">Retour</button>
+</section>
+
+<div id="toast"></div>
+
+<script>
+const socket = io();
+const $ = id => document.getElementById(id);
+let mode = "offline";
+let roomCode = "";
+let myId = "";
+let myRole = "Équipier";
+let currentRoom = null;
+let game = null;
+let ready = true;
+let coins = Number(localStorage.getItem("catCoins") || 0);
+let stats = JSON.parse(localStorage.getItem("catStats") || '{"wins":0,"games":0}');
+let owned = JSON.parse(localStorage.getItem("catOwned") || '["Chat classique"]');
+let selectedSkin = localStorage.getItem("catSkin") || "Chat classique";
+let offlineVote = false;
+
+const evilRoles = ["Tueur classique","Sniper","Ninja","Métamorphe"];
+const neutralRoles = ["Pélican","Mentaliste","Bouffon"];
+const innocentRoles = ["Équipier","Détective","Médecin","Ingénieur","Juge","Shérif"];
+const skins = [
+  {name:"Chat classique",price:0,emoji:"🐱"},
+  {name:"Chat noir",price:100,emoji:"🐈‍⬛"},
+  {name:"Chat astronaute",price:200,emoji:"👨‍🚀"},
+  {name:"Chat tigre",price:300,emoji:"🐯"},
+  {name:"Chat fantôme",price:400,emoji:"👻"}
+];
+
+function show(id){
+  document.querySelectorAll("body > section").forEach(s=>s.classList.add("hidden"));
+  $(id).classList.remove("hidden");
+  if(id==="shop") renderShop();
+  if(id==="ranking") renderRanking();
+}
+
+function toast(message){
+  $("toast").textContent=message;
+  $("toast").style.display="block";
+  setTimeout(()=>$("toast").style.display="none",2600);
+}
+
+function saveStats(){
+  localStorage.setItem("catCoins",coins);
+  localStorage.setItem("catStats",JSON.stringify(stats));
+  localStorage.setItem("catOwned",JSON.stringify(owned));
+  $("coins").textContent=coins;
+}
+
+function getName(){
+  return ($("nickname").value.trim() || "Chat").slice(0,16);
+}
+
+function randomRole(list){return list[Math.floor(Math.random()*list.length)]}
+
+function assignLocalRoles(players){
+  players.forEach(p=>{p.role="Équipier";p.team="innocent";p.alive=true;p.tasks=0});
+  const evilCount=players.length>=8?2:1;
+  const evil=players.slice().sort(()=>Math.random()-.5).slice(0,evilCount);
+  evil.forEach(p=>{p.role=randomRole(evilRoles);p.team="evil"});
+  const others=players.filter(p=>!evil.includes(p));
+  if(players.length>6 && others.length){
+    const n=others[Math.floor(Math.random()*others.length)];
+    n.role=randomRole(neutralRoles);n.team="neutral";
+  }
+  const specialists=["Détective","Médecin","Ingénieur","Juge","Shérif"];
+  const available=players.filter(p=>p.team==="innocent"&&p.role==="Équipier");
+  specialists.forEach(role=>{
+    if(available.length){
+      const i=Math.floor(Math.random()*available.length);
+      available.splice(i,1)[0].role=role;
+    }
+  });
+}
+
+function startOffline(){
+  mode="offline";
+  const bots=Math.max(0,Math.min(10,Number($("offlineBots").value)||0));
+  const names=["Minou","Pixel","Moustache","Neko","Biscuit","Luna","Shadow","Piko","Caramel","Tigrou"];
+  game={
+    phase:"playing",
+    map:$("offlineMap").value,
+    sabotage:null,
+    meeting:null,
+    players:[{id:"me",name:getName(),bot:false,alive:true,tasks:0},
+      ...Array.from({length:bots},(_,i)=>({
+        id:"bot"+i,name:names[i%names.length]+" "+(i+1),
+        bot:true,alive:true,tasks:0
+      }))]
+  };
+  assignLocalRoles(game.players);
+  myRole=game.players[0].role;
+  $("myRole").textContent=myRole;
+  $("gameMap").textContent=game.map;
+  $("coins").textContent=coins;
+  show("game");
+  renderGame();
+  toast("Partie hors ligne lancée !");
+}
+
+function createRoom(){
+  mode="online";
+  socket.emit("room:create",{
+    name:getName(),
+    npcCount:Number($("onlineBots").value)||0,
+    map:$("onlineMap").value
+  });
+}
+
+function joinRoom(){
+  mode="online";
+  socket.emit("room:join",{
+    name:getName(),
+    code:$("roomCode").value.trim().toUpperCase()
+  });
+}
+
+socket.on("room:joined",data=>{
+  roomCode=data.code;
+  myId=data.playerId;
+  $("roomCodeDisplay").textContent=roomCode;
+  show("lobby");
+  toast("Salon rejoint !");
+});
+
+socket.on("room:update",room=>{
+  currentRoom=room;
+  if(!$("lobby").classList.contains("hidden")) renderLobby();
+});
+
+function renderLobby(){
+  if(!currentRoom)return;
+  $("roomCodeDisplay").textContent=currentRoom.code;
+  $("lobbyBots").value=currentRoom.npcCount;
+  $("lobbyMap").value=currentRoom.map;
+  $("lobbyPlayers").innerHTML="";
+  currentRoom.players.forEach(p=>{
+    const div=document.createElement("div");
+    div.className="player";
+    div.textContent=(p.name||"Chat")+" "+(p.ready?"✅":"⌛");
+    $("lobbyPlayers").appendChild(div);
+  });
+  const total=currentRoom.players.length+currentRoom.npcCount;
+  $("lobbyCount").textContent=total+" / 11 participants ("+
+    currentRoom.players.length+" humains + "+currentRoom.npcCount+" PNJ)";
+  $("startButton").style.display=currentRoom.hostId===myId?"inline-block":"none";
+}
+
+function changeBots(){socket.emit("room:npcs",Number($("lobbyBots").value)||0)}
+function changeMap(){socket.emit("room:map",$("lobbyMap").value)}
+function toggleReady(){ready=!ready;socket.emit("player:ready",ready);toast(ready?"Tu es prêt":"Tu n'es plus prêt")}
+function launchOnline(){socket.emit("game:start")}
+function leaveRoom(){location.reload()}
+
+socket.on("game:role",data=>{
+  myRole=data.role;
+  $("myRole").textContent=myRole;
+  toast("Ton rôle : "+myRole);
+});
+
+socket.on("game:state",state=>{
+  game=state;
+  $("gameMap").textContent=state.map;
+  show("game");
+  renderGame();
+});
+
+socket.on("game:ended",data=>{
+  stats.games++;
+  if(data.winner==="Innocents" && myRole==="Équipier")stats.wins++;
+  saveStats();
+  toast("Fin de partie : "+data.winner+" gagne !");
+});
+
+socket.on("error:message",message=>toast(message));
+
+function renderGame(){
+  if(!game)return;
+  $("gameMap").textContent=game.map;
+  $("playersGame").innerHTML="";
+  game.players.forEach(p=>{
+    const div=document.createElement("div");
+    div.className="player";
+    const label=document.createElement("span");
+    label.textContent=(p.alive===false?"👻 ":"🐱 ")+p.name+(p.id==="me"||p.id===myId?" (toi)":"");
+    div.appendChild(label);
+    if(p.alive!==false && p.id!=="me" && p.id!==myId){
+      const b=document.createElement("button");
+      b.textContent="Cibler";
+      b.onclick=()=>targetPlayer(p.id);
+      div.appendChild(b);
+    }
+    $("playersGame").appendChild(div);
+  });
+  $("meetingArea").classList.toggle("hidden",game.phase!=="meeting");
+  $("gameMessage").textContent=game.sabotage?
+    "🚨 Sabotage en cours : "+game.sabotage:
+    "Explore la carte, fais tes missions et reste vigilant !";
+}
+
+function doTask(){
+  if(mode==="online"){socket.emit("game:task");return}
+  const me=game.players[0];
+  if(!me.alive)return;
+  me.tasks++;
+  toast("Mission terminée !");
+  if(game.players.filter(p=>p.team==="innocent").reduce((n,p)=>n+p.tasks,0)>=12){
+    finishLocal("Innocents");
+  }
+  renderGame();
+}
+
+function targetPlayer(id){
+  if(mode==="online"){
+    if(["Tueur classique","Sniper","Ninja","Métamorphe","Shérif","Pélican"].includes(myRole)){
+      socket.emit("game:eliminate",id);
+    }else{
+      toast("Ton rôle ne permet pas cette action ici.");
+    }
+    return;
+  }
+  const actor=game.players[0];
+  const target=game.players.find(p=>p.id===id);
+  if(!actor.alive||!target||!target.alive)return;
+  if(evilRoles.includes(actor.role) && target.team!=="evil"){
+    target.alive=false;
+    toast("Un joueur a été éliminé !");
+  }else if(actor.role==="Shérif"){
+    if(target.team==="evil"){target.alive=false;toast("Le Shérif a trouvé un méchant !")}
+    else{actor.role="Équipier";myRole=actor.role;$("myRole").textContent=myRole;toast("Mauvaise cible : pouvoir perdu.")}
+  }else if(actor.role==="Pélican" && target.team==="innocent"){
+    target.alive=false;toast("Le Pélican a éliminé un innocent !");
+  }else{
+    toast("Tu ne peux pas cibler ce joueur.");
+  }
+  renderGame();
+  checkLocalWinner();
+}
+
+function sabotage(type){
+  if(mode==="online"){socket.emit("game:sabotage",type);return}
+  if(!evilRoles.includes(myRole)){toast("Seuls les méchants peuvent saboter.");return}
+  if(game.sabotage){toast("Un sabotage est déjà actif.");return}
+  game.sabotage=type;
+  renderGame();
+}
+
+function repair(){
+  if(mode==="online"){socket.emit("game:repair");return}
+  if(!game.sabotage){toast("Aucun sabotage.");return}
+  if(game.players[0].team==="evil"){toast("Tu ne peux pas réparer.");return}
+  game.sabotage=null;
+  toast("Sabotage réparé !");
+  renderGame();
+}
+
+function callMeeting(){
+  if(mode==="online"){socket.emit("game:meeting");return}
+  game.phase="meeting";
+  $("meetingArea").classList.remove("hidden");
+  $("votePlayers").innerHTML="";
+  game.players.filter(p=>p.alive).forEach(p=>{
+    const b=document.createElement("button");
+    b.textContent="Voter pour "+p.name;
+    b.onclick=()=>vote(p.id);
+    $("votePlayers").appendChild(b);
+  });
+  renderGame();
+}
+
+function vote(id){
+  if(mode==="online"){socket.emit("game:vote",id);return}
+  if(offlineVote)return;
+  offlineVote=true;
+  const target=game.players.find(p=>p.id===id);
+  if(target)target.alive=false;
+  else if(id==="skip")toast("Vote passé.");
+  const bouffon=target&&target.role==="Bouffon";
+  if(bouffon){finishLocal("Bouffon");return}
+  game.phase="playing";
+  $("meetingArea").classList.add("hidden");
+  offlineVote=false;
+  toast(target?target.name+" a été éliminé par le vote.":"Personne n'a été éliminé.");
+  renderGame();
+  checkLocalWinner();
+}
+
+function checkLocalWinner(){
+  const alive=game.players.filter(p=>p.alive);
+  const evil=alive.filter(p=>p.team==="evil");
+  const innocent=alive.filter(p=>p.team==="innocent");
+  if(!evil.length)finishLocal("Innocents");
+  else if(evil.length>=innocent.length)finishLocal("Méchants");
+}
+
+function finishLocal(winner){
+  game.phase="finished";
+  stats.games++;
+  if(winner==="Innocents"&&game.players[0].team==="innocent")stats.wins++;
+  if(winner==="Méchants"&&game.players[0].team==="evil")stats.wins++;
+  if(winner==="Bouffon"&&game.players[0].role==="Bouffon")stats.wins++;
+  coins+=50;
+  saveStats();
+  toast("🏆 "+winner+" gagnent ! +50 pièces");
+  setTimeout(()=>show("menu"),1800);
+}
+
+function renderShop(){
+  $("shopCoins").textContent=coins;
+  $("shopItems").innerHTML="";
+  skins.forEach(s=>{
+    const div=document.createElement("div");
+    div.className="shopItem";
+    const info=document.createElement("span");
+    info.textContent=s.emoji+" "+s.name+" — "+s.price+" pièces";
+    const b=document.createElement("button");
+    if(owned.includes(s.name)){
+      b.textContent=selectedSkin===s.name?"Équipé":"Équiper";
+      b.onclick=()=>{selectedSkin=s.name;localStorage.setItem("catSkin",s.name);renderShop()};
+    }else{
+      b.textContent="Acheter";
+      b.onclick=()=>{
+        if(coins<s.price){toast("Pas assez de pièces.");return}
+        coins-=s.price;owned.push(s.name);saveStats();renderShop();
+      };
+    }
+    div.append(info,b);$("shopItems").appendChild(div);
+  });
+}
+
+function renderRanking(){
+  $("rankingList").innerHTML=
+    "<div class='player'>Parties jouées : "+stats.games+"</div>"+
+    "<div class='player'>Victoires : "+stats.wins+"</div>"+
+    "<div class='player'>Pièces : "+coins+"</div>";
+}
+
+$("coins").textContent=coins;
+</script>
+</body>
+</html>
+
